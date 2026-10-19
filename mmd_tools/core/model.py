@@ -1212,6 +1212,10 @@ class Model:
             logging.info("****************************************")
             start_time = time.time()
 
+            # Remove the temporary objects first: the rest of clean scales with the number of objects in the
+            # scene, and these can be tens of thousands of non-collision constraints.
+            self.__removeTemporaryObjects()
+
             pose_bones = []
             arm = self.armature()
             if arm is not None:
@@ -1245,7 +1249,6 @@ class Model:
             for i in self.joints():
                 self.__restoreTransforms(i)
 
-            self.__removeTemporaryObjects()
             self.connectPhysicsBones()
 
             arm = self.armature()
