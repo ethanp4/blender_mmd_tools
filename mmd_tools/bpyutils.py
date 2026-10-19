@@ -3,7 +3,7 @@
 
 import contextlib
 import math
-from typing import Generator, List, Optional, TypeVar
+from typing import Any, Dict, Generator, Iterable, List, Optional, TypeVar
 
 import bmesh
 import bpy
@@ -481,32 +481,83 @@ class FnContext:
         return result_objects
 
     @staticmethod
-    def hide_objects(context: bpy.types.Context, objects: List[bpy.types.Object]):
-        """
-        Hide objects in the viewport.
-
-        Object.hide_set() resyncs the whole view layer on every call, which is O(N^2) for thousands of objects.
-        When a 3D view is available, select the objects and hide them with a single operator call instead.
-        """
+    def __find_view3d_override(context: bpy.types.Context) -> Optional[Dict[str, Any]]:
         window = context.window or next(iter(context.window_manager.windows), None)
         area = next((a for a in window.screen.areas if a.type == "VIEW_3D"), None) if window else None
-        if area is not None:
-            region = next(r for r in area.regions if r.type == "WINDOW")
-            with context.temp_override(window=window, area=area, region=region):
-                selected_objects = context.selected_objects
-                for obj in selected_objects:
-                    obj.select_set(False)
-                for obj in objects:
-                    obj.select_set(True)
-                bpy.ops.object.hide_view_set(unselected=False)
-                for obj in selected_objects:
-                    if obj.visible_get():
-                        obj.select_set(True)
+        if area is None:
+            return None
+        return {"window": window, "area": area, "region": next(r for r in area.regions if r.type == "WINDOW")}
 
-        # Fallback for no 3D view, and for objects the operator skipped (e.g. not selectable)
+    @staticmethod
+    def set_objects_hidden(context: bpy.types.Context, objects: Iterable[bpy.types.Object], hide: bool):
+        """
+        Hide or unhide objects in the viewport, like calling Object.hide_set(hide) on each of them.
+
+        Object.hide_set() resyncs the whole view layer on every call, which is O(N^2) for thousands of objects.
+        When a 3D view is available, use one hide/unhide operator call instead:
+        - hide: select the objects and hide the selection.
+        - unhide: unhide everything, then hide the objects that were hidden before and are not targets.
+        Falls back to Object.hide_set() without a 3D view.
+        """
+        objects = [obj for obj in objects if obj.hide_get() != hide]
+        if not objects:
+            return
+
+        override = FnContext.__find_view3d_override(context)
+        # unhiding re-hides every other hidden object, which costs more than a few hide_set() calls
+        if not hide and len(objects) < 64:
+            override = None
+        if override is not None:
+            if hide:
+                FnContext.__hide_by_selection(context, override, objects)
+            else:
+                targets = set(objects)
+                others = [obj for obj in context.view_layer.objects if obj.hide_get() and obj not in targets]
+                with context.temp_override(**override):
+                    bpy.ops.object.hide_view_clear(select=False)
+                if others:
+                    FnContext.__hide_by_selection(context, override, others)
+                    # hide_view_set can skip objects that were unselectable before hide_view_clear, so hide those one by one
+                    for obj in others:
+                        if not obj.hide_get():
+                            obj.hide_set(True)
+
+        # Fallback for no 3D view, and for objects the operators skipped (e.g. in a hidden collection)
         for obj in objects:
-            if not obj.hide_get():
-                obj.hide_set(True)
+            if obj.hide_get() != hide:
+                obj.hide_set(hide)
+
+    @staticmethod
+    def __hide_by_selection(context: bpy.types.Context, override: Dict[str, Any], objects: List[bpy.types.Object]):
+        # hide_view_set only hides selected objects, so make unselectable ones selectable for the moment
+        unselectable_objects = [obj for obj in objects if obj.hide_select]
+        if unselectable_objects:
+            FnContext.set_hide_select(unselectable_objects, False)
+        # restore selection and selectability even if select_set() fails (e.g. an object not in the view layer)
+        try:
+            with context.temp_override(**override):
+                selected_objects = context.selected_objects
+                try:
+                    for obj in selected_objects:
+                        obj.select_set(False)
+                    for obj in objects:
+                        obj.select_set(True)
+                    bpy.ops.object.hide_view_set(unselected=False)
+                finally:
+                    for obj in objects:
+                        if obj.visible_get():
+                            obj.select_set(False)
+                    for obj in selected_objects:
+                        if obj.visible_get():
+                            obj.select_set(True)
+        finally:
+            if unselectable_objects:
+                FnContext.set_hide_select(unselectable_objects, True)
+
+    @staticmethod
+    def hide_objects(context: bpy.types.Context, objects: List[bpy.types.Object]):
+        """Hide objects in the viewport. See set_objects_hidden()."""
+        FnContext.set_objects_hidden(context, objects, True)
 
     @staticmethod
     def set_hide_select(objects: List[bpy.types.Object], hide_select: bool = True):
