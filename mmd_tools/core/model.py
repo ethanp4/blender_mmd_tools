@@ -12,7 +12,7 @@ import rna_prop_ui
 from mathutils import Matrix, Vector
 
 from .. import MMD_TOOLS_VERSION
-from ..bpyutils import FnContext, Props, createObject, duplicateObject, edit_object, select_object
+from ..bpyutils import FnContext, Props, createObject, edit_object, select_object
 from . import rigid_body
 from .morph import FnMorph
 from .rigid_body import MODE_DYNAMIC, MODE_DYNAMIC_BONE, MODE_STATIC
@@ -145,11 +145,10 @@ class FnModel:
 
     @staticmethod
     def iterate_child_objects(obj: Optional[bpy.types.Object]) -> Iterator[bpy.types.Object]:
-        if obj is None:
-            return iter(())
-        for child in obj.children:
-            yield child
-            yield from FnModel.iterate_child_objects(child)
+        # Object.children scans all of bpy.data.objects on every call, so recursing with it is O(N^2).
+        # children_recursive scans once and yields the same depth-first order.
+        if obj is not None:
+            yield from obj.children_recursive
 
     @staticmethod
     def iterate_filtered_child_objects(condition_function: Callable[[bpy.types.Object], bool], obj: Optional[bpy.types.Object]) -> Iterator[bpy.types.Object]:
@@ -159,10 +158,9 @@ class FnModel:
 
     @staticmethod
     def __iterate_filtered_child_objects_internal(condition_function: Callable[[bpy.types.Object], bool], obj: bpy.types.Object) -> Iterator[bpy.types.Object]:
-        for child in obj.children:
+        for child in obj.children_recursive:
             if condition_function(child):
                 yield child
-            yield from FnModel.__iterate_filtered_child_objects_internal(condition_function, child)
 
     @staticmethod
     def __iterate_child_mesh_objects(obj: Optional[bpy.types.Object]) -> Iterator[bpy.types.Object]:
@@ -1264,8 +1262,8 @@ class Model:
             rigid_body.setRigidBodyWorldEnabled(rigidbody_world_enabled)
 
     def __removeTemporaryObjects(self):
-        with bpy.context.temp_override(selected_objects=tuple(self.temporaryObjects()), active_object=self.rootObject()):
-            bpy.ops.object.delete()
+        # batch_remove is much faster than bpy.ops.object.delete() for thousands of objects
+        bpy.data.batch_remove(tuple(self.temporaryObjects()))
 
     def __restoreTransforms(self, obj):
         for attr in ("location", "rotation_euler"):
@@ -1474,14 +1472,15 @@ class Model:
         rb = ncc_obj.rigid_body_constraint
         rb.disable_collisions = True
 
-        ncc_objs = duplicateObject(ncc_obj, total_len)
+        ncc_objs = FnContext.copy_object(ncc_obj, total_len)
         logging.debug(" created %d ncc.", len(ncc_objs))
 
         for ncc_obj, pair in zip(ncc_objs, nonCollisionJointTable, strict=False):
             rbc = ncc_obj.rigid_body_constraint
             rbc.object1, rbc.object2 = pair
-            ncc_obj.hide_set(True)
-            ncc_obj.hide_select = True
+        # hide in batches: per-object hide_set() and hide_select are O(N^2) overall
+        FnContext.hide_objects(FnContext.ensure_context(), ncc_objs)
+        FnContext.set_hide_select(ncc_objs)
         logging.debug(" finish in %f seconds.", time.time() - start_time)
         logging.debug("-" * 60)
 
