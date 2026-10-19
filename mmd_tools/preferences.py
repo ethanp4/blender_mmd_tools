@@ -77,7 +77,7 @@ class MMDToolsAddonPreferences(bpy.types.AddonPreferences):
     )
     use_collision_collections: bpy.props.BoolProperty(
         name="Use Collision Collections for New Models",
-        description="Default of the Collision Collections setting for newly imported or created models. See the setting next to Assembly -> Physics",
+        description="Default Collision Collections setting for newly imported or created models. See the setting next to Assembly -> Physics",
         default=False,
     )
     shared_toon_folder: bpy.props.StringProperty(

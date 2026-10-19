@@ -426,8 +426,8 @@ class MMDRoot(bpy.types.PropertyGroup):
 
     use_collision_collections: bpy.props.BoolProperty(
         name="Collision Collections",
-        description="Map MMD collision groups to rigid body collision collections when building physics. Needs far fewer non-collision constraints, so building and playing physics is much faster for models with many rigid bodies.\n\n"
-        "Rigid bodies outside MMD models (e.g. a floor) that are in the first collision collection still collide with the whole model. Bodies of other MMD models may not. Rebuild physics to apply",
+        description="Map MMD collision groups to rigid body collision collections when building physics. Uses far fewer non-collision constraints,"
+        " but rigid bodies outside MMD models may have unintended collision behaviour unless manually added to collections. Rebuild physics to apply",
         default=False,
     )
 
