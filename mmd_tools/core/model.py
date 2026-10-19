@@ -4,6 +4,7 @@
 import itertools
 import logging
 import time
+import uuid
 from collections import Counter
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Iterator, Optional, Set, TypeGuard, Union, cast
 
@@ -1255,6 +1256,7 @@ class Model:
             for i in self.joints():
                 self.__restoreTransforms(i)
 
+            self.__releaseExternalRigidBodies()
             self.connectPhysicsBones()
 
             arm = self.armature()
@@ -1288,6 +1290,56 @@ class Model:
             if attr_name in obj:  # should not happen in normal build/clean cycle
                 continue
             obj[attr_name] = getattr(obj, attr, None)
+
+    def __collisionCollectionsUserKey(self) -> str:
+        key = self.__root.get("__collision_collections_user__")
+        if key is None:
+            key = self.__root["__collision_collections_user__"] = uuid.uuid4().hex
+        return key
+
+    def __includeExternalRigidBodies(self, used_collections: Set[int]):
+        """
+        Outside rigid bodies (e.g. a floor) in the first collision collection used to collide with every MMD
+        rigid body, because those were all in the first collection. Add the collections used by this model to
+        them so that they still do. Each model that does this is recorded so that clean() can undo only its part.
+        """
+        rigidbody_world = bpy.context.scene.rigidbody_world
+        if rigidbody_world is None or rigidbody_world.collection is None or not used_collections:
+            return
+        key = self.__collisionCollectionsUserKey()
+        mask = sum(1 << i for i in used_collections)
+        for obj in rigidbody_world.collection.objects:
+            if obj.rigid_body is None or obj.mmd_type == "RIGID_BODY":
+                continue
+            users = obj.get("__collision_collections_users__")
+            collections = obj.rigid_body.collision_collections
+            if users is None:
+                if not collections[0]:
+                    continue
+                obj["__backup_collision_collections__"] = [int(v) for v in collections]
+                users = {}
+            users = dict(users)
+            users[key] = mask
+            obj["__collision_collections_users__"] = users
+            obj.rigid_body.collision_collections = [collections[i] or i in used_collections for i in range(20)]
+
+    def __releaseExternalRigidBodies(self):
+        key = self.__root.get("__collision_collections_user__")
+        if key is None:
+            return
+        for obj in bpy.data.objects:
+            users = obj.get("__collision_collections_users__")
+            if users is None or key not in users:
+                continue
+            users = {k: v for k, v in users.items() if k != key}
+            backup = obj.get("__backup_collision_collections__")
+            if obj.rigid_body is not None and backup is not None:
+                obj.rigid_body.collision_collections = [bool(v) or any(m >> i & 1 for m in users.values()) for i, v in enumerate(backup)]
+            if users:
+                obj["__collision_collections_users__"] = users
+            else:
+                del obj["__collision_collections_users__"]
+                obj.pop("__backup_collision_collections__", None)
 
     def __restoreCollisionCollections(self, obj):
         val = obj.get("__backup_collision_collections__", None)
@@ -1612,6 +1664,8 @@ class Model:
             if collision_collections is not None and i.rigid_body is not None:
                 self.__backupCollisionCollections(i)
                 i.rigid_body.collision_collections = [n in collision_collections[i] for n in range(20)]
+        if collision_collections is not None:
+            self.__includeExternalRigidBodies(set().union(*collision_collections.values()))
         self.__createNonCollisionConstraint(nonCollisionJointTable)
         return rigid_objects
 
