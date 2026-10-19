@@ -578,8 +578,10 @@ class FnContext:
             if obj.as_pointer() in targets:
                 values[i] = hide_select
         all_objects.foreach_set("hide_select", values)
-        # foreach_set() skips the update callback, so trigger one view layer resync to refresh base selectability
-        objects[0].hide_set(objects[0].hide_get())
+        # foreach_set() skips the update callback, so tag the objects and evaluate once to refresh base selectability
+        for obj in objects:
+            obj.update_tag()
+        bpy.context.view_layer.update()
 
     @staticmethod
     def find_user_layer_collection_by_object(context: bpy.types.Context, target_object: bpy.types.Object) -> Optional[bpy.types.LayerCollection]:
