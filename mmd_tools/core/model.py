@@ -968,6 +968,7 @@ class Model:
         root.mmd_type = "ROOT"
         root.mmd_root.name = name
         root.mmd_root.name_e = name_e
+        root.mmd_root.use_collision_collections = FnContext.get_addon_preferences_attribute(context, "use_collision_collections", False)
         root["mmd_tools_version"] = MMD_TOOLS_VERSION
         setattr(root, Props.empty_display_size, scale / 0.2)
         FnContext.link_object(context, root)
@@ -1186,7 +1187,10 @@ class Model:
             if old_bone_name in mesh.vertex_groups:
                 mesh.vertex_groups[old_bone_name].name = new_bone_name
 
-    def build(self, non_collision_distance_scale=1.5, collision_margin=1e-06, use_collision_collections=True):
+    def build(self, non_collision_distance_scale=1.5, collision_margin=1e-06, use_collision_collections: Optional[bool] = None):
+        """use_collision_collections: None uses the model's mmd_root.use_collision_collections setting"""
+        if use_collision_collections is None:
+            use_collision_collections = self.__root.mmd_root.use_collision_collections
         rigidbody_world_enabled = rigid_body.setRigidBodyWorldEnabled(False)
         try:
             if self.__root.mmd_root.is_built:

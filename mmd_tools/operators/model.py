@@ -82,12 +82,6 @@ class BuildRig(bpy.types.Operator):
         default=1e-06,
     )
 
-    use_collision_collections: bpy.props.BoolProperty(
-        name="Use Collision Collections",
-        description="Map MMD collision groups to rigid body collision collections, which needs far fewer non-collision constraints and builds much faster for models with many rigid bodies.\n\nWarning: rigid bodies outside the model (e.g. a floor or another model) only collide with the bodies that share one of their collision collections",
-        default=True,
-    )
-
     def execute(self, context):
         if context.scene.rigidbody_world:
             context.scene.rigidbody_world.enabled = True
@@ -96,7 +90,7 @@ class BuildRig(bpy.types.Operator):
 
         with FnContext.temp_override_active_layer_collection(context, root_object):
             rig = Model(root_object)
-            rig.build(self.non_collision_distance_scale, self.collision_margin, self.use_collision_collections)
+            rig.build(self.non_collision_distance_scale, self.collision_margin)
             FnContext.set_active_object(context, root_object)
 
         return {"FINISHED"}
