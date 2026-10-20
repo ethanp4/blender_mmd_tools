@@ -1265,8 +1265,18 @@ class Model:
             rigid_body.setRigidBodyWorldEnabled(rigidbody_world_enabled)
 
     def __removeTemporaryObjects(self):
-        # batch_remove is much faster than bpy.ops.object.delete() for thousands of objects
-        bpy.data.batch_remove(tuple(self.temporaryObjects()))
+        objects = tuple(self.temporaryObjects())
+        # Freeing an object does not remove its rigid body (constraint) from the physics world, which would then
+        # crash on the next simulation step. The delete operator removes them from the world first, and the fake
+        # user keeps it from also freeing each object one by one (very slow for thousands of objects).
+        physics_objects = [obj for obj in objects if obj.rigid_body_constraint or obj.rigid_body]
+        if physics_objects:
+            for obj in physics_objects:
+                obj.use_fake_user = True
+            with bpy.context.temp_override(selected_objects=physics_objects, active_object=self.rootObject()):
+                bpy.ops.object.delete()
+        # batch_remove frees everything in one pass, much faster than per-object deletion
+        bpy.data.batch_remove(objects)
 
     def __restoreTransforms(self, obj):
         for attr in ("location", "rotation_euler"):
